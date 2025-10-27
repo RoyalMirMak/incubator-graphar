@@ -29,7 +29,7 @@ def validate(import_config: ImportConfig):
             msg = f"Duplicate vertex type {vertex.type}"
             raise ValueError(msg)
         vertex_types.add(vertex.type)
-
+    for vertex in import_config.import_schema.vertices:
         prop_names = set()
         primary_keys = []
         for prop_group in vertex.property_groups:
@@ -49,6 +49,15 @@ def validate(import_config: ImportConfig):
                     if prop.nullable:
                         msg = f"Primary key '{prop.name}' in '{vertex.type}' cannot be nullable"
                         raise ValueError(msg)
+        for prop_group in vertex.property_groups:
+            for prop in prop_group.properties:
+                if prop.remap_to:
+                    if prop.remap_to not in vertex_types:
+                        msg = (
+                            f"Property '{prop.name}' in vertex '{vertex.type}' "
+                            f"references non-existent vertex type '{prop.remap_to}' in remap_to"
+                        )
+                        raise ValueError(msg)
         source_values = [value for source in vertex.sources for value in source.columns.values()]
         for prop_name in prop_names:
             if prop_name not in source_values:
@@ -62,10 +71,11 @@ def validate(import_config: ImportConfig):
 
     edge_types = set()
     for edge in import_config.import_schema.edges:
-        if edge.edge_type in edge_types:
-            msg = f"Duplicate edge type {edge.type}"
+        triplet = f"{edge.src_type}_{edge.edge_type}_{edge.dst_type}"
+        if triplet in edge_types:
+            msg = f"Duplicate edge type {triplet}"
             raise ValueError(msg)
-        edge_types.add(edge.edge_type)
+        edge_types.add(triplet)
 
         if edge.src_type not in vertex_types:
             msg = f"Source vertex type {edge.src_type} not found"
@@ -101,6 +111,15 @@ def validate(import_config: ImportConfig):
                 f"in edge '{edge.edge_type}'"
             )
             raise ValueError(msg)
+        for prop_group in edge.property_groups:
+            for prop in prop_group.properties:
+                if prop.remap_to:
+                    if prop.remap_to not in vertex_types:
+                        msg = (
+                            f"Property '{prop.name}' in edge '{edge.edge_type}' "
+                            f"references non-existent vertex type '{prop.remap_to}' in remap_to"
+                        )
+                        raise ValueError(msg)
         prop_names = set()
         for prop_group in edge.property_groups:
             for prop in prop_group.properties:

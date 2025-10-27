@@ -69,6 +69,7 @@ class Property(BaseModel):
     data_type: Literal["bool", "int32", "int64", "float", "double", "string", "date", "timestamp"]
     is_primary: bool = False
     nullable: Optional[bool] = None
+    remap_to: Optional[str] = None
 
     @model_validator(mode="after")
     def check_nullable(self) -> Self:
