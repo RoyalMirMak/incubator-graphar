@@ -532,16 +532,17 @@ std::string DoImport(const py::dict& config_dict) {
         table = table->AddColumn(index, new_field, new_column).ValueOrDie();
       }
     }
-    std::cout << "Writing vertex " << vertex.type << " to file" << std::endl;
-
+    std::cout << "Writing vertex " << vertex.type << " to file..." << std::endl;
+    std::cout << "vpw " << vertex_prop_writers[vertex.type] << std::endl;
     for (const auto& property_group : pgs_by_vtype[vertex.type]) {
       vertex_prop_writers[vertex.type]->WriteTable(table, property_group,
                                      start_chunk_index);
     }
     auto vertex_count = table->num_rows();
+    std::cout << "vc " << vertex_count << std::endl;
     vertex_counts[vertex.type] = vertex_count;
     vertex_prop_writers[vertex.type]->WriteVerticesNum(vertex_count);
-
+    std::cout << "Adding labels..." << std::endl;
     for (auto& label : vertex.labels) {
       vertices_labels.push_back(label);
     }
@@ -737,11 +738,14 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& field : combined_edge_table->schema()->fields()) {
         edge_column_names.push_back(field->name());
       }
+      for (auto &column_name: edge_column_names) {
+        std::cout << "  Edge column: " << column_name << std::endl;
+      }
       const int64_t num_rows = combined_edge_table->num_rows();
       std::cout << "  Processing " << num_rows << " edge records..."
                 << std::endl;
       for (int64_t i = 0; i < num_rows; ++i) {
-        if (i % 10000 == 0 && i != 0) {
+        if (i % 1000000 == 0 && i != 0) {
           std::cout << "    Processed " << i << " edges..." << std::endl;
         }
         auto edge_src_column =
@@ -785,8 +789,8 @@ std::string DoImport(const py::dict& config_dict) {
             vertex_prop_index_map.at(src_key).at(src_scalar),
             vertex_prop_index_map.at(dst_key).at(dst_scalar));
         for (const auto& column_name : edge_column_names) {
-          if (column_name != edge.src_edge_prop &&
-              column_name != edge.dst_edge_prop) {
+          // if (column_name != edge.src_edge_prop &&
+          //     column_name != edge.dst_edge_prop) {
             auto column = combined_edge_table->GetColumnByName(column_name);
             auto column_type = column->type();
             std::any value;
@@ -796,15 +800,15 @@ std::string DoImport(const py::dict& config_dict) {
             if (value.has_value()) {
               e.AddProperty(column_name, value);
             }
-          }
+          // }
         }
         edge_builder->AddEdge(e);
       }
       std::cout
           << "  Finished processing all edge records. Dumping builder data..."
           << std::endl;
-      edge_builder->SetValidateLevel(
-          StringToValidateLevel(edge.validate_level));
+      edge_builder->SetValidateLevel(graphar::ValidateLevel::weak_validate);
+      std::cout << "Set validate level to weak_validate" << std::endl;
       edge_builder->Dump();
       std::cout << "  Finished dumping builder data." << std::endl;
     }

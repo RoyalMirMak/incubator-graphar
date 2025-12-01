@@ -58,6 +58,8 @@ def validate(import_config: ImportConfig):
                             f"references non-existent vertex type '{prop.remap_to}' in remap_to"
                         )
                         raise ValueError(msg)
+        for source in vertex.sources:
+            print(source.columns)
         source_values = [value for source in vertex.sources for value in source.columns.values()]
         for prop_name in prop_names:
             if prop_name not in source_values:

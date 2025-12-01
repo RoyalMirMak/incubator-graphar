@@ -487,7 +487,7 @@ EdgeChunkWriter::EdgeChunkWriter(const std::shared_ptr<EdgeInfo>& edge_info,
   }
   if (validate_level_ == ValidateLevel::default_validate) {
     throw std::runtime_error(
-        "default_validate is not allowed to be set as the global validate "
+        "default_validate is VERY not allowed to be set as the global validate "
         "level for EdgeChunkWriter");
   }
   GAR_ASSIGN_OR_RAISE_ERROR(fs_, FileSystemFromUriOrPath(prefix, &prefix_));

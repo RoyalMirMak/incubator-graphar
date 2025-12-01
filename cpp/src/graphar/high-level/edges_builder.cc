@@ -24,10 +24,17 @@
 #include "graphar/high-level/edges_builder.h"
 #include "graphar/result.h"
 
+#include <iostream>
+
 namespace graphar::builder {
 
 Status EdgesBuilder::Dump() {
   // construct the writer
+  std::cout << "validate level inside " << static_cast<int>(validate_level_) << std::endl;
+  if (validate_level_ == ValidateLevel::default_validate) {
+    std::cout << "PISSYAA" << std::endl;
+    validate_level_ = ValidateLevel::weak_validate;
+  }
   EdgeChunkWriter writer(edge_info_, prefix_, adj_list_type_, writer_options_,
                          validate_level_);
   // construct empty edge collections for vertex chunks without edges

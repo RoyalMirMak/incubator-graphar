@@ -27,6 +27,8 @@
 #include <utility>
 #include <vector>
 
+#include <iostream>
+
 #include "graphar/arrow/chunk_writer.h"
 #include "graphar/fwd.h"
 #include "graphar/graph_info.h"
@@ -208,6 +210,7 @@ class EdgesBuilder {
    * @param validate_level The validate level to set.
    */
   inline void SetValidateLevel(const ValidateLevel& validate_level) {
+    std::cout << "POOOOPANIK" << std::endl;
     if (validate_level == ValidateLevel::default_validate) {
       return;
     }
