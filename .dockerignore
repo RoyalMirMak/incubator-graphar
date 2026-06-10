@@ -1,0 +1,56 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# macOS folder view
+**/.DS_Store
+
+# toolchain
+.idea/
+build/
+.gitlab-ci.yml
+.gitlab-ci-compliance.yml
+approvers.yml
+CONTRIBUTING.md
+policy.yml
+CODE_OF_CONDUCT.md
+README.md
+README-zh-cn.md
+
+.devcontainer/
+.github/
+.gitlab/
+configs/
+dev/
+docs/
+maven-projects/
+pyspark/
+.asf.yaml
+.pre-commit-config.yaml
+buf.gen.yaml
+buf.yaml

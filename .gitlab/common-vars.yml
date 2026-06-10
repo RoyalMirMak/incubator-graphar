@@ -1,0 +1,18 @@
+---
+variables:
+  DOCKER_REGISTRY: docker-hosted.artifactory.tcsbank.ru/rnd-grapher
+  REGISTRY_IMAGE_NAME: ${DOCKER_REGISTRY}/graphar-cli
+
+  # Enable color output in various tools.
+  # CMake, Ninja, and others: https://bixense.com/clicolors/
+  CLICOLOR_FORCE: "1"
+  # pytest
+  FORCE_COLOR: "1"
+
+  BASE_IMAGE: docker-hosted.artifactory.tcsbank.ru/rnd-grapher/graphar-dev-base-arrow-23-jdk-17
+  BASE_IMAGE_TAG: v0.0.1
+  WORKDIR: /home/graphar
+
+  # Deployment variables
+  BASE_BUILD_IMAGE: ${REGISTRY_IMAGE_NAME}:${IMAGE_TAG}
+...
