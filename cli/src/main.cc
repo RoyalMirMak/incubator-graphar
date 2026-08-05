@@ -20,6 +20,9 @@
 #include "graphar/api/info.h"
 #include "importer.h"
 #include "merger.h"
+#include "backtrace.h"
+
+#include <signal.h>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -147,6 +150,13 @@ std::vector<std::vector<std::string>> GetEdgeTypes(const std::string& path) {
   return edge_types;
 }
 
+static void backtrace_callback(int signum)
+{
+    struct backtrace_state* state = backtrace_create_state(nullptr, 1, nullptr, nullptr);
+    backtrace_print(state, 0, stderr);
+    _exit(EXIT_FAILURE);
+}
+
 namespace py = pybind11;
 PYBIND11_MODULE(_core, m) {
   m.doc() = "GraphAr Python bindings";
@@ -167,4 +177,6 @@ PYBIND11_MODULE(_core, m) {
 #else
   m.attr("__version__") = "dev";
 #endif
+
+  signal(SIGSEGV, backtrace_callback);
 }
