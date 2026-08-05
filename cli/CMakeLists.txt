@@ -53,22 +53,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 # Принудительно используем статическую версию libgomp
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -lgomp -lpthread")
 
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/backtrace/libbacktrace.a"
-    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/backtrace/gdb-17.2.tar.xz"
-    COMMAND mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backtrace"
-    COMMAND cd "${CMAKE_CURRENT_BINARY_DIR}/backtrace" && tar xf "${CMAKE_CURRENT_SOURCE_DIR}/backtrace/gdb-17.2.tar.xz"
-    COMMAND cd "${CMAKE_CURRENT_BINARY_DIR}/backtrace/gdb-17.2/libbacktrace" && ./configure && make -j20
-    COMMAND cp "${CMAKE_CURRENT_BINARY_DIR}/backtrace/gdb-17.2/libbacktrace/.libs/libbacktrace.a" "${CMAKE_CURRENT_BINARY_DIR}/backtrace/"
-)
-add_custom_target(backtrace_target DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/backtrace/libbacktrace.a")
-add_library(backtrace STATIC IMPORTED GLOBAL)
-set_target_properties(backtrace PROPERTIES
-    IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/backtrace/libbacktrace.a"
-    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/backtrace"
-)
-add_dependencies(backtrace backtrace_target)
-
 # Check if ORC is enabled.
 if (NOT ${ARROW_ORC})
     message(WARNING "apache-arrow is built without ORC extension, ORC related functionalities will be disabled.")
@@ -89,7 +73,6 @@ target_link_libraries(_core PRIVATE pybind11::headers graphar Arrow::arrow_share
                                     Parquet::parquet_shared
                                     ArrowDataset::arrow_dataset_shared
                                     ArrowAcero::arrow_acero_shared
-                                    backtrace
                                     )
 target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
 target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
