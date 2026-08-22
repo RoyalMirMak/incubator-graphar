@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <filesystem>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -402,64 +404,59 @@ void ClearS3FileSystemCache() {
 
 Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     const std::string& uri_string, std::string* out_path) {
-  if (uri_string.length() >= 1 && uri_string[0] == '/') {
-    // if the uri_string is an absolute path, we need to create a local file
+  // Handle relative paths by converting to absolute. A relative path
+  // (no leading '/', no scheme like "s3://") is first normalized to an
+  // absolute path so it can be handled by the local filesystem branch below.
+  std::string normalized_uri = uri_string;
+  if (uri_string.length() >= 1 && uri_string[0] != '/' &&
+      uri_string.find("://") == std::string::npos) {
+    normalized_uri = std::filesystem::absolute(uri_string).string();
+  }
+
+  if (normalized_uri.length() >= 1 && normalized_uri[0] == '/') {
+    // if the normalized path is an absolute path, we need to create a local
+    // file system
     GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
         auto arrow_fs,
-        arrow::fs::FileSystemFromUriOrPath(uri_string, out_path));
-    // arrow would delete the last slash, so use uri string
+        arrow::fs::FileSystemFromUriOrPath(normalized_uri, out_path));
+    // arrow would delete the last slash, so use the normalized path
     if (out_path != nullptr) {
-      *out_path = uri_string;
+      *out_path = normalized_uri;
     }
     return std::make_shared<FileSystem>(arrow_fs);
   }
 
   // Cache only s3/s3a URIs. Everything else preserves the original behavior
   // (a fresh filesystem per call).
-  if (!IsS3Uri(uri_string)) {
-    GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(uri_string));
+  if (!IsS3Uri(normalized_uri)) {
+    GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(normalized_uri));
     if (out_path != nullptr) {
-      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(normalized_uri));
       *out_path = computed;
     }
     return std::make_shared<FileSystem>(arrow_fs);
   }
 
   auto& cache = GetS3FileSystemCache();
-  {
-    std::lock_guard<std::mutex> guard(cache.mutex);
+  std::lock_guard<std::mutex> guard(cache.mutex);
 
-    auto it = cache.entries.find(uri_string);
-    if (it != cache.entries.end()) {
-      if (out_path != nullptr) {
-        GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
-        *out_path = computed;
-      }
-      return it->second;
-    }
-  }
-
-  {
-    std::lock_guard<std::mutex> guard(cache.mutex);
-    // re-check under the lock in case another thread already created it
-    auto it = cache.entries.find(uri_string);
-    if (it != cache.entries.end()) {
-      if (out_path != nullptr) {
-        GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
-        *out_path = computed;
-      }
-      return it->second;
-    }
-
-    GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(uri_string));
-    auto fs = std::make_shared<FileSystem>(arrow_fs);
-    cache.entries.emplace(uri_string, fs);
+  auto it = cache.entries.find(normalized_uri);
+  if (it != cache.entries.end()) {
     if (out_path != nullptr) {
-      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(normalized_uri));
       *out_path = computed;
     }
-    return fs;
+    return it->second;
   }
+
+  GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(normalized_uri));
+  auto fs = std::make_shared<FileSystem>(arrow_fs);
+  cache.entries.emplace(normalized_uri, fs);
+  if (out_path != nullptr) {
+    GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(normalized_uri));
+    *out_path = computed;
+  }
+  return fs;
 }
 
 // arrow::fs::InitializeS3 and arrow::fs::FinalizeS3 need arrow_version >= 15
