@@ -1065,6 +1065,15 @@ static Result<std::shared_ptr<GraphInfo>> ConstructGraphInfo(
   }
   if (!graph_meta->operator[]("prefix").IsNone()) {
     prefix = graph_meta->operator[]("prefix").As<std::string>();
+    // A relative prefix (e.g. "./" or "vertex/") is resolved relative to the
+    // directory of the graph YAML file, not the process CWD. This matches the
+    // convention that graph data lives alongside the graph metadata. Only an
+    // explicitly declared prefix is resolved this way; the default prefix is
+    // already derived from the graph file's directory and must be used as-is.
+    if (!prefix.empty() && prefix.find("://") == std::string::npos &&
+        prefix[0] != '/') {
+      prefix = no_url_path + prefix;
+    }
   }
   std::shared_ptr<const InfoVersion> version = nullptr;
   if (!graph_meta->operator[]("version").IsNone()) {

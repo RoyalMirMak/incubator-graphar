@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include "graphar/writer_util.h"
@@ -347,23 +348,33 @@ FileSystem::~FileSystem() {}
 
 Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     const std::string& uri_string, std::string* out_path) {
-  if (uri_string.length() >= 1 && uri_string[0] == '/') {
-    // if the uri_string is an absolute path, we need to create a local file
+  // Handle relative paths by converting to absolute. A relative path
+  // (no leading '/', no scheme like "s3://") is first normalized to an
+  // absolute path so it can be handled by the local filesystem branch below.
+  std::string normalized_uri = uri_string;
+  if (uri_string.length() >= 1 && uri_string[0] != '/' &&
+      uri_string.find("://") == std::string::npos) {
+    normalized_uri = std::filesystem::absolute(uri_string).string();
+  }
+
+  if (normalized_uri.length() >= 1 && normalized_uri[0] == '/') {
+    // if the normalized path is an absolute path, we need to create a local
+    // file system
     GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
         auto arrow_fs,
-        arrow::fs::FileSystemFromUriOrPath(uri_string, out_path));
-    // arrow would delete the last slash, so use uri string
+        arrow::fs::FileSystemFromUriOrPath(normalized_uri, out_path));
+    // arrow would delete the last slash, so use the normalized path
     if (out_path != nullptr) {
-      *out_path = uri_string;
+      *out_path = normalized_uri;
     }
     return std::make_shared<FileSystem>(arrow_fs);
   }
 
   GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
-      auto arrow_fs, arrow::fs::FileSystemFromUriOrPath(uri_string));
-  auto uri = uri::parse_uri(uri_string);
+      auto arrow_fs, arrow::fs::FileSystemFromUriOrPath(normalized_uri));
+  auto uri = uri::parse_uri(normalized_uri);
   if (uri.error != uri::Error::None) {
-    return Status::Invalid("Failed to parse URI: ", uri_string);
+    return Status::Invalid("Failed to parse URI: ", normalized_uri);
   }
   if (out_path != nullptr) {
     if (uri.scheme == "file" || uri.scheme == "hdfs" || uri.scheme.empty()) {
@@ -373,7 +384,7 @@ Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
       *out_path = uri.authority.host + uri.path;
     } else {
       return Status::Invalid("Unrecognized filesystem type in URI: ",
-                             uri_string);
+                             normalized_uri);
     }
   }
   return std::make_shared<FileSystem>(arrow_fs);
