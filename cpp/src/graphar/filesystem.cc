@@ -348,18 +348,21 @@ FileSystem::~FileSystem() {}
 
 Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     const std::string& uri_string, std::string* out_path) {
-  // Handle relative paths by converting to absolute. A relative path
-  // (no leading '/', no scheme like "s3://") is first normalized to an
+  // First, parse the URI to determine whether it carries a remote scheme
+  // (e.g. "s3://", "hdfs://"). Non-URIs are treated as local filesystem paths.
+  auto uri = uri::parse_uri(uri_string);
+  bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
+
+  // A relative local path (no scheme, not absolute) is normalized to an
   // absolute path so it can be handled by the local filesystem branch below.
   std::string normalized_uri = uri_string;
-  if (uri_string.length() >= 1 && uri_string[0] != '/' &&
-      uri_string.find("://") == std::string::npos) {
+  if (!is_remote &&
+      std::filesystem::path(uri_string).is_relative()) {
     normalized_uri = std::filesystem::absolute(uri_string).string();
   }
 
-  if (normalized_uri.length() >= 1 && normalized_uri[0] == '/') {
-    // if the normalized path is an absolute path, we need to create a local
-    // file system
+  if (!is_remote) {
+    // the input is a local filesystem path (absolute after normalization)
     GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
         auto arrow_fs,
         arrow::fs::FileSystemFromUriOrPath(normalized_uri, out_path));
@@ -370,14 +373,11 @@ Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     return std::make_shared<FileSystem>(arrow_fs);
   }
 
+  // Remote URI: delegate parsing to arrow and compute the object path.
   GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
       auto arrow_fs, arrow::fs::FileSystemFromUriOrPath(normalized_uri));
-  auto uri = uri::parse_uri(normalized_uri);
-  if (uri.error != uri::Error::None) {
-    return Status::Invalid("Failed to parse URI: ", normalized_uri);
-  }
   if (out_path != nullptr) {
-    if (uri.scheme == "file" || uri.scheme == "hdfs" || uri.scheme.empty()) {
+    if (uri.scheme == "file" || uri.scheme == "hdfs") {
       *out_path = uri.path;
     } else if (uri.scheme == "s3" || uri.scheme == "gs") {
       // bucket name is the host, path is the path

@@ -17,11 +17,13 @@
  * under the License.
  */
 
+#include <filesystem>
 #include <unordered_set>
 #include <utility>
 
 #include "graphar/status.h"
 #include "mini-yaml/yaml/Yaml.hpp"
+#include "simple-uri-parser/uri_parser.h"
 
 #include "graphar/filesystem.h"
 #include "graphar/graph_info.h"
@@ -1067,12 +1069,16 @@ static Result<std::shared_ptr<GraphInfo>> ConstructGraphInfo(
     prefix = graph_meta->operator[]("prefix").As<std::string>();
     // A relative prefix (e.g. "./" or "vertex/") is resolved relative to the
     // directory of the graph YAML file, not the process CWD. This matches the
-    // convention that graph data lives alongside the graph metadata. Only an
-    // explicitly declared prefix is resolved this way; the default prefix is
-    // already derived from the graph file's directory and must be used as-is.
-    if (!prefix.empty() && prefix.find("://") == std::string::npos &&
-        prefix[0] != '/') {
-      prefix = no_url_path + prefix;
+    // convention that graph data lives alongside the graph metadata. Remote
+    // schemes (e.g. "s3://") carry a non-empty URI scheme, so they are treated
+    // as absolute; only genuinely relative prefixes are rewritten. The default
+    // prefix is already derived from the graph file's directory and must be
+    // used as-is.
+    auto uri = uri::parse_uri(prefix);
+    bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
+    if (!prefix.empty() && !is_remote &&
+      std::filesystem::path(prefix).is_relative()) {
+      prefix = (std::filesystem::path(no_url_path) / prefix).string();
     }
   }
   std::shared_ptr<const InfoVersion> version = nullptr;
