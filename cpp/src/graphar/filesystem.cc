@@ -17,8 +17,9 @@
  * under the License.
  */
 
-#include <iostream>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 #include "graphar/writer_util.h"
 #ifdef ARROW_ORC
 #include "arrow/adapters/orc/adapter.h"
@@ -345,6 +346,60 @@ Result<IdType> FileSystem::GetFileNumOfDir(const std::string& dir_path,
 
 FileSystem::~FileSystem() {}
 
+namespace {
+
+// Returns true if the URI is an S3-style URI (scheme "s3" or "s3a").
+bool IsS3Uri(const std::string& uri_string) {
+  return uri_string.rfind("s3://", 0) == 0 ||
+         uri_string.rfind("s3a://", 0) == 0;
+}
+
+// Compute the out_path (base directory inside the filesystem) for the given
+// URI, mirroring the logic used by the original uncached FileSystemFromUriOrPath.
+Result<std::string> ComputeOutPath(const std::string& uri_string) {
+  auto uri = uri::parse_uri(uri_string);
+  if (uri.error != uri::Error::None) {
+    return Status::Invalid("Failed to parse URI: ", uri_string);
+  }
+  if (uri.scheme == "file" || uri.scheme == "hdfs" || uri.scheme.empty()) {
+    return uri.path;
+  } else if (uri.scheme == "s3" || uri.scheme == "gs") {
+    // bucket name is the host, path is the path
+    return uri.authority.host + uri.path;
+  }
+  return Status::Invalid("Unrecognized filesystem type in URI: ", uri_string);
+}
+
+// Simple helper to create a single Arrow filesystem without caching (the
+// original behavior).
+Result<std::shared_ptr<arrow::fs::FileSystem>> MakeArrowFsUncached(
+    const std::string& uri_string) {
+  GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
+      auto arrow_fs, arrow::fs::FileSystemFromUriOrPath(uri_string));
+  return arrow_fs;
+}
+
+struct S3FileSystemCache {
+  std::mutex mutex;
+  std::unordered_map<std::string, std::shared_ptr<graphar::FileSystem>> entries;
+};
+
+S3FileSystemCache& GetS3FileSystemCache() {
+  static S3FileSystemCache cache;
+  return cache;
+}
+
+// Drop all cached filesystems. Must be called before arrow::fs::FinalizeS3()
+// so that the strong shared_ptrs holding the arrow S3 filesystems are released
+// before Arrow finalizes its S3 clients.
+void ClearS3FileSystemCache() {
+  auto& cache = GetS3FileSystemCache();
+  std::lock_guard<std::mutex> guard(cache.mutex);
+  cache.entries.clear();
+}
+
+}  // namespace
+
 Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     const std::string& uri_string, std::string* out_path) {
   if (uri_string.length() >= 1 && uri_string[0] == '/') {
@@ -359,24 +414,52 @@ Result<std::shared_ptr<FileSystem>> FileSystemFromUriOrPath(
     return std::make_shared<FileSystem>(arrow_fs);
   }
 
-  GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
-      auto arrow_fs, arrow::fs::FileSystemFromUriOrPath(uri_string));
-  auto uri = uri::parse_uri(uri_string);
-  if (uri.error != uri::Error::None) {
-    return Status::Invalid("Failed to parse URI: ", uri_string);
+  // Cache only s3/s3a URIs. Everything else preserves the original behavior
+  // (a fresh filesystem per call).
+  if (!IsS3Uri(uri_string)) {
+    GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(uri_string));
+    if (out_path != nullptr) {
+      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+      *out_path = computed;
+    }
+    return std::make_shared<FileSystem>(arrow_fs);
   }
-  if (out_path != nullptr) {
-    if (uri.scheme == "file" || uri.scheme == "hdfs" || uri.scheme.empty()) {
-      *out_path = uri.path;
-    } else if (uri.scheme == "s3" || uri.scheme == "gs") {
-      // bucket name is the host, path is the path
-      *out_path = uri.authority.host + uri.path;
-    } else {
-      return Status::Invalid("Unrecognized filesystem type in URI: ",
-                             uri_string);
+
+  auto& cache = GetS3FileSystemCache();
+  {
+    std::lock_guard<std::mutex> guard(cache.mutex);
+
+    auto it = cache.entries.find(uri_string);
+    if (it != cache.entries.end()) {
+      if (out_path != nullptr) {
+        GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+        *out_path = computed;
+      }
+      return it->second;
     }
   }
-  return std::make_shared<FileSystem>(arrow_fs);
+
+  {
+    std::lock_guard<std::mutex> guard(cache.mutex);
+    // re-check under the lock in case another thread already created it
+    auto it = cache.entries.find(uri_string);
+    if (it != cache.entries.end()) {
+      if (out_path != nullptr) {
+        GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+        *out_path = computed;
+      }
+      return it->second;
+    }
+
+    GAR_ASSIGN_OR_RAISE(auto arrow_fs, MakeArrowFsUncached(uri_string));
+    auto fs = std::make_shared<FileSystem>(arrow_fs);
+    cache.entries.emplace(uri_string, fs);
+    if (out_path != nullptr) {
+      GAR_ASSIGN_OR_RAISE(auto computed, ComputeOutPath(uri_string));
+      *out_path = computed;
+    }
+    return fs;
+  }
 }
 
 // arrow::fs::InitializeS3 and arrow::fs::FinalizeS3 need arrow_version >= 15
@@ -395,6 +478,9 @@ Status InitializeS3() {
 
 Status FinalizeS3() {
 #if defined(ARROW_VERSION) && ARROW_VERSION >= 15000000
+  // Drop cached filesystems before Arrow finalizes its S3 clients, so no
+  // strong reference to an arrow S3 filesystem outlives finalization.
+  ClearS3FileSystemCache();
   RETURN_NOT_ARROW_OK(arrow::fs::FinalizeS3());
 #endif
   return Status::OK();
