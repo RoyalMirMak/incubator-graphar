@@ -365,7 +365,7 @@ Result<std::string> ComputeOutPath(const std::string& uri_string) {
   }
   if (uri.scheme == "file" || uri.scheme == "hdfs" || uri.scheme.empty()) {
     return uri.path;
-  } else if (uri.scheme == "s3" || uri.scheme == "gs") {
+  } else if (uri.scheme == "s3" || uri.scheme == "s3a" || uri.scheme == "gs") {
     // bucket name is the host, path is the path
     return uri.authority.host + uri.path;
   }

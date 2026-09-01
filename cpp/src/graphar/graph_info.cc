@@ -1067,19 +1067,29 @@ static Result<std::shared_ptr<GraphInfo>> ConstructGraphInfo(
   }
   if (!graph_meta->operator[]("prefix").IsNone()) {
     prefix = graph_meta->operator[]("prefix").As<std::string>();
-    // A relative prefix (e.g. "./" or "vertex/") is resolved relative to the
-    // directory of the graph YAML file, not the process CWD. This matches the
-    // convention that graph data lives alongside the graph metadata. Remote
-    // schemes (e.g. "s3://") carry a non-empty URI scheme, so they are treated
-    // as absolute; only genuinely relative prefixes are rewritten. The default
-    // prefix is already derived from the graph file's directory and must be
-    // used as-is.
+    // The graph prefix is concatenated directly with chunk paths downstream
+    // (e.g. `prefix_ + chunk_file_path` in chunk_reader.cc), so a declared
+    // prefix must end with a trailing slash. Relative prefixes are resolved
+    // below, but they still have to declare the slash.
+    if (!prefix.empty() && prefix.back() != '/') {
+      return Status::Invalid(
+          "The graph prefix must end with a trailing slash, but got: ",
+          prefix);
+    }
     auto uri = uri::parse_uri(prefix);
     bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
     if (!prefix.empty() && !is_remote &&
-      std::filesystem::path(prefix).is_relative()) {
-      prefix = (std::filesystem::path(no_url_path) / prefix).string();
+        std::filesystem::path(prefix).is_relative()) {
+      while (prefix.rfind("./", 0) == 0) {
+        prefix = prefix.substr(2);
+      }
+      prefix = (std::filesystem::path(default_prefix) / prefix).string();
     }
+  }
+  auto uri = uri::parse_uri(prefix);
+  bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
+  if (!is_remote && std::filesystem::path(prefix).is_relative()) {
+    prefix = std::filesystem::absolute(prefix).string();
   }
   std::shared_ptr<const InfoVersion> version = nullptr;
   if (!graph_meta->operator[]("version").IsNone()) {
